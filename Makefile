@@ -12,7 +12,11 @@ else
     TARGET := libfzf.so
 endif
 
-all: build/$(TARGET)
+all: build/$(TARGET) build/cli
+
+build/cli: src/fzf.c src/fzf.h src/cli.c
+	$(MKD) build
+	$(CC) -O3 -Wall -Werror src/fzf.c src/cli.c -o build/cli -pthread
 
 build/$(TARGET): src/fzf.c src/fzf.h
 	$(MKD) build
