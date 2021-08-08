@@ -294,9 +294,37 @@ void worker(char *copy, fzf_pattern_t *pattern, fzf_slab_t *slab) {
   }
 }
 
+// TODO(conni2461): multithreaded (makes it slower and we dont even add it to a
+// linked list)
+//
+// int main(int argc, char **argv) {
+//   pool_t *pool = pool_create(2);
+//   fzf_pattern_t *pattern = fzf_parse_pattern(case_smart, false, argv[1],
+//   true);
+
+//   char *line = NULL;
+//   size_t len = 0;
+//   ssize_t read;
+//   while ((read = getline(&line, &len, stdin)) != -1) {
+//     char *copy = (char *)malloc(sizeof(char) * read);
+//     strncpy(copy, line, read - 1);
+//     copy[read - 1] = '\0';
+//     pool_add_work(pool, worker, copy, pattern);
+//   }
+
+//   pool_wait(pool);
+
+//   fzf_free_pattern(pattern);
+//   free(line);
+//   pool_destroy(pool);
+//   return 0;
+// }
+
+// Singlethreaded
 int main(int argc, char **argv) {
-  pool_t *pool = pool_create(2);
+  fzf_slab_t *slab = fzf_make_default_slab();
   fzf_pattern_t *pattern = fzf_parse_pattern(case_smart, false, argv[1], true);
+  fzf_linked_list_t *list = fzf_list_create();
 
   char *line = NULL;
   size_t len = 0;
@@ -305,13 +333,17 @@ int main(int argc, char **argv) {
     char *copy = (char *)malloc(sizeof(char) * read);
     strncpy(copy, line, read - 1);
     copy[read - 1] = '\0';
-    pool_add_work(pool, worker, copy, pattern);
+
+    int32_t score = fzf_get_score(copy, pattern, slab);
+    if (score > 0) {
+      fzf_list_insert(list, (fzf_tuple_t){.str = copy, .score = score});
+    }
   }
 
-  pool_wait(pool);
-
+  fzf_list_print(list);
+  fzf_list_free(list);
   fzf_free_pattern(pattern);
+  fzf_free_slab(slab);
   free(line);
-  pool_destroy(pool);
   return 0;
 }
