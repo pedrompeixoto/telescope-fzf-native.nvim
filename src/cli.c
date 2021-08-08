@@ -11,19 +11,22 @@
 
 typedef struct pool pool_t;
 
-typedef void (*thread_func_t)(int arg);
+typedef void (*thread_func_t)(char *, fzf_pattern_t *, fzf_slab_t *);
 
 pool_t *pool_create(size_t num);
 void pool_destroy(pool_t *tm);
 
-bool pool_add_work(pool_t *tm, thread_func_t func, int arg);
+bool pool_add_work(pool_t *tm, thread_func_t func, char *text,
+                   fzf_pattern_t *pattern);
 void pool_wait(pool_t *tm);
 
-typedef struct pool_work {
+typedef struct pool_work_s pool_work_t;
+struct pool_work_s {
   thread_func_t func;
-  int arg;
-  struct pool_work *next;
-} pool_work_t;
+  char *text;
+  fzf_pattern_t *pattern;
+  pool_work_t *next;
+};
 
 struct pool {
   pool_work_t *work_first;
@@ -36,23 +39,24 @@ struct pool {
   bool stop;
 };
 
-static pool_work_t *pool_work_create(thread_func_t func, int arg) {
+static pool_work_t *pool_work_create(thread_func_t func, char *text,
+                                     fzf_pattern_t *pattern) {
   if (func == NULL) {
     return NULL;
   }
 
   pool_work_t *work = malloc(sizeof(*work));
   work->func = func;
-  work->arg = arg;
+  work->text = text;
+  work->pattern = pattern;
   work->next = NULL;
   return work;
 }
 
 static void pool_work_destroy(pool_work_t *work) {
-  if (work == NULL) {
-    return;
+  if (work) {
+    free(work);
   }
-  free(work);
 }
 
 static pool_work_t *tpool_work_get(pool_t *tm) {
@@ -78,6 +82,7 @@ static pool_work_t *tpool_work_get(pool_t *tm) {
 static void *tpool_worker(void *arg) {
   pool_t *tm = arg;
   pool_work_t *work;
+  fzf_slab_t *slab = fzf_make_default_slab();
 
   while (1) {
     pthread_mutex_lock(&(tm->work_mutex));
@@ -95,7 +100,7 @@ static void *tpool_worker(void *arg) {
     pthread_mutex_unlock(&(tm->work_mutex));
 
     if (work != NULL) {
-      work->func(work->arg);
+      work->func(work->text, work->pattern, slab);
       pool_work_destroy(work);
     }
 
@@ -107,6 +112,7 @@ static void *tpool_worker(void *arg) {
     pthread_mutex_unlock(&(tm->work_mutex));
   }
 
+  fzf_free_slab(slab);
   tm->thread_cnt--;
   pthread_cond_signal(&(tm->working_cond));
   pthread_mutex_unlock(&(tm->work_mutex));
@@ -117,10 +123,6 @@ pool_t *pool_create(size_t num) {
   pool_t *tm;
   pthread_t thread;
   size_t i;
-
-  if (num == 0) {
-    num = 2;
-  }
 
   tm = calloc(1, sizeof(*tm));
   tm->thread_cnt = num;
@@ -168,12 +170,13 @@ void pool_destroy(pool_t *tm) {
   free(tm);
 }
 
-bool pool_add_work(pool_t *tm, thread_func_t func, int arg) {
+bool pool_add_work(pool_t *tm, thread_func_t func, char *text,
+                   fzf_pattern_t *pattern) {
   if (tm == NULL) {
     return false;
   }
 
-  pool_work_t *work = pool_work_create(func, arg);
+  pool_work_t *work = pool_work_create(func, text, pattern);
   if (work == NULL) {
     return false;
   }
@@ -234,7 +237,7 @@ static fzf_node_t *create_node(fzf_tuple_t item) {
   return node;
 }
 
-static fzf_linked_list_t *fzf_list_create() {
+fzf_linked_list_t *fzf_list_create() {
   fzf_linked_list_t *list =
       (fzf_linked_list_t *)malloc(sizeof(fzf_linked_list_t));
   list->len = 0;
@@ -242,7 +245,7 @@ static fzf_linked_list_t *fzf_list_create() {
   return list;
 }
 
-static void fzf_list_free(fzf_linked_list_t *list) {
+void fzf_list_free(fzf_linked_list_t *list) {
   if (list->head) {
     fzf_node_t *curr = list->head;
     while (curr != NULL) {
@@ -256,7 +259,7 @@ static void fzf_list_free(fzf_linked_list_t *list) {
   free(list);
 }
 
-static void fzf_list_insert(fzf_linked_list_t *list, fzf_tuple_t item) {
+void fzf_list_insert(fzf_linked_list_t *list, fzf_tuple_t item) {
   ++list->len;
   fzf_node_t *new_node = create_node(item);
   if (list->head == NULL || list->head->item.score <= new_node->item.score) {
@@ -273,7 +276,7 @@ static void fzf_list_insert(fzf_linked_list_t *list, fzf_tuple_t item) {
   }
 }
 
-static void fzf_list_print(fzf_linked_list_t *list) {
+void fzf_list_print(fzf_linked_list_t *list) {
   fzf_node_t *curr = list->head;
   while (curr != NULL) {
     printf("%s (%d)\n", curr->item.str, curr->item.score);
@@ -281,10 +284,19 @@ static void fzf_list_print(fzf_linked_list_t *list) {
   }
 }
 
+void worker(char *copy, fzf_pattern_t *pattern, fzf_slab_t *slab) {
+  // fzf_linked_list_t *list) {
+  int32_t score = fzf_get_score(copy, pattern, slab);
+  if (score > 0) {
+    printf("%s (%d)\n", copy, score);
+    free(copy);
+    // fzf_list_insert(list, (fzf_tuple_t){.str = copy, .score = score});
+  }
+}
+
 int main(int argc, char **argv) {
-  fzf_slab_t *slab = fzf_make_default_slab();
+  pool_t *pool = pool_create(2);
   fzf_pattern_t *pattern = fzf_parse_pattern(case_smart, false, argv[1], true);
-  fzf_linked_list_t *list = fzf_list_create();
 
   char *line = NULL;
   size_t len = 0;
@@ -293,17 +305,13 @@ int main(int argc, char **argv) {
     char *copy = (char *)malloc(sizeof(char) * read);
     strncpy(copy, line, read - 1);
     copy[read - 1] = '\0';
-
-    int32_t score = fzf_get_score(copy, pattern, slab);
-    if (score > 0) {
-      fzf_list_insert(list, (fzf_tuple_t){.str = copy, .score = score});
-    }
+    pool_add_work(pool, worker, copy, pattern);
   }
 
-  fzf_list_print(list);
-  fzf_list_free(list);
+  pool_wait(pool);
+
   fzf_free_pattern(pattern);
-  fzf_free_slab(slab);
   free(line);
+  pool_destroy(pool);
   return 0;
 }
