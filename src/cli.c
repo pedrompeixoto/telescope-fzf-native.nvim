@@ -9,6 +9,7 @@
 typedef struct {
   char *str;
   int32_t score;
+  size_t len;
 } fzf_tuple_t;
 
 typedef struct {
@@ -50,12 +51,14 @@ void swap(fzf_tuple_t *x, fzf_tuple_t *y) {
 
 // take strlen in consideration if lhs == rhs
 static bool smaller(fzf_tuple_t *lhs, fzf_tuple_t *rhs) {
-  return lhs->score < rhs->score;
+  return (lhs->score == rhs->score && lhs->len > rhs->len) ||
+         lhs->score < rhs->score;
 }
 
 // take strlen in consideration if lhs == rhs
 bool greater(fzf_tuple_t *lhs, fzf_tuple_t *rhs) {
-  return lhs->score > rhs->score;
+  return (lhs->score == rhs->score && lhs->len < rhs->len) ||
+         lhs->score > rhs->score;
 }
 
 static void insert(heap_t *heap, fzf_tuple_t data) {
@@ -111,19 +114,19 @@ int main(int argc, char **argv) {
   size_t len = 0;
   ssize_t read;
   while ((read = getline(&line, &len, stdin)) != -1) {
-    char *copy = (char *)malloc(sizeof(char) * read);
-    strncpy(copy, line, read - 1);
-    copy[read - 1] = '\0';
-
-    int32_t score = fzf_get_score(copy, pattern, slab);
+    line[read - 1] = '\0';
+    int32_t score = fzf_get_score(line, pattern, slab);
     if (score > 0) {
-      insert(heap, (fzf_tuple_t){.str = copy, .score = score});
+      char *copy = (char *)malloc(sizeof(char) * read);
+      strncpy(copy, line, read - 1);
+      copy[read - 1] = '\0';
+      insert(heap, (fzf_tuple_t){.str = copy, .score = score, .len = read - 1});
     }
   }
 
   while (heap->len > 0) {
     fzf_tuple_t el = extract_max(heap);
-    printf("%s (%d)\n", el.str, el.score);
+    printf("%s\n", el.str);
     free(el.str);
   }
   free_heap(heap);
