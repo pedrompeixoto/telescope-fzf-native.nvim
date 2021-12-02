@@ -1,5 +1,22 @@
 # telescope-fzf-native.nvim
 
+This is a fork of the plugin telescope-fzf-native.nvim to facilitate building libfzf.dll on windows.
+
+Currently using wsl and mingw to build the libfzf.dll. 
+
+The goal is to get the DLL building natively using msvc compiler (cl), did some brief 
+testing and the compiled DLL didn't seem to work, most likely the flags passed to 
+compiler were incorrect.
+
+## Usage on windows
+requirements
+- wsl
+- mingw-w64 installed on wsl (sudo apt-get install mingw-w64)
+
+```viml
+Plug 'pedrompeixoto/telescope-fzf-native.nvim', { 'do': 'wsl sh build.sh' }
+```
+
 **fzf-native** is a `c` port of **[fzf][fzf]**. It only covers the algorithm and
 implements few functions to support calculating the score.
 
